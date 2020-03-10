@@ -23,15 +23,25 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
+using dnlib.DotNet.Pdb;
 
 namespace JitDasm {
-	readonly struct StatementInfo {
+	readonly struct StatementInfo
+	{
+		public readonly int IlOffset;
+		public readonly SequencePoint SeqPoint;
+		public readonly string DocumentUrl;
 		public readonly string Line;
 		public readonly Span Span;
 		public readonly bool Partial;
-		public StatementInfo(string line, Span span, bool partial) {
+		public StatementInfo(string line, Span span, bool partial, string documentUrl, SequencePoint seqPoint,
+			int ilOffset) {
+			IlOffset = ilOffset;
+			SeqPoint = seqPoint;
+			DocumentUrl = documentUrl;
 			Line = line;
 			Span = span;
 			Partial = partial;
@@ -72,6 +82,30 @@ namespace JitDasm {
 				lastMethod = lastModule?.ResolveToken(method.MethodToken) as MethodDef;
 			return lastMethod;
 		}
+		
+		public IEnumerable<StatementInfo> GetMethodStatementInfo(DisasmInfo method)
+		{
+			var ilOffsets = method.ILMap.Select(m => m.ilOffset).Where(x => x >= 0).ToArray();
+			var instrs = GetMetadataMethod(method)?.Body?.Instructions;
+			if (instrs is null)
+				yield break;
+
+			foreach (var ilOffset in ilOffsets) {
+				var instr = GetInstruction(instrs, (uint) ilOffset);
+				var seqPoint = instr?.SequencePoint;
+				if (seqPoint is null)
+					continue;
+
+				const int HIDDEN = 0xFEEFEE;
+				if (seqPoint.StartLine == HIDDEN || seqPoint.EndLine == HIDDEN)
+					yield break;
+
+				foreach (var info in sourceDocumentProvider.GetLines(seqPoint.Document.Url, seqPoint.StartLine,
+					seqPoint.StartColumn, seqPoint.EndLine, seqPoint.EndColumn))
+					yield return new StatementInfo(info.line, info.span, info.partial, seqPoint.Document.Url, seqPoint, ilOffset);
+			}
+		}
+
 
 		public IEnumerable<StatementInfo> GetStatementLines(DisasmInfo method, int ilOffset) {
 			var instrs = GetMetadataMethod(method)?.Body?.Instructions;
@@ -87,7 +121,7 @@ namespace JitDasm {
 				yield break;
 
 			foreach (var info in sourceDocumentProvider.GetLines(seqPoint.Document.Url, seqPoint.StartLine, seqPoint.StartColumn, seqPoint.EndLine, seqPoint.EndColumn))
-				yield return new StatementInfo(info.line, info.span, info.partial);
+				yield return new StatementInfo(info.line, info.span, info.partial, seqPoint.Document.Url, seqPoint, ilOffset);
 		}
 
 		Instruction? GetInstruction(IList<Instruction> instructions, uint offset) {

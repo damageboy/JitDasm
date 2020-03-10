@@ -30,6 +30,7 @@ namespace JitDasm {
 		OneFile,
 		OneFilePerType,
 		OneFilePerMethod,
+		ELF,
 	}
 
 	enum FilenameFormat {

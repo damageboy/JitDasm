@@ -23,9 +23,11 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Iced.Intel;
+using LibObjectFile.Elf;
 using Microsoft.Diagnostics.Runtime;
 
 namespace JitDasm {
@@ -59,7 +61,18 @@ namespace JitDasm {
 					var sourceCodeProvider = new SourceCodeProvider(mdProvider, sourceDocumentProvider);
 					using (var context = new DisasmJobContext(bitness, knownSymbols, sourceCodeProvider, jitDasmOptions.DisassemblerOutputKind, jitDasmOptions.Diffable, jitDasmOptions.ShowAddresses, jitDasmOptions.ShowHexBytes, jitDasmOptions.ShowSourceCode)) {
 						foreach (var job in jobs)
-							Disassemble(context, job);
+							switch (job.Kind)
+							{
+								case DisasmJobKind.Disassemble:
+									Disassemble(context, job);
+									break;
+								case DisasmJobKind.Dump:
+									Dump(context, job, sourceCodeProvider);
+									break;
+								default:
+									throw new ArgumentOutOfRangeException();
+							}
+							
 					}
 				}
 				return 0;
@@ -88,12 +101,27 @@ namespace JitDasm {
 		}
 
 		sealed class DisasmJob {
+			public DisasmJobKind Kind; 
 			public readonly Func<(TextWriter writer, bool close)> GetTextWriter;
 			public readonly DisasmInfo[] Methods;
+			public readonly string ElfFileName;
+			public readonly ElfObjectFile ElfObjectFile;
+			
 			public DisasmJob(Func<(TextWriter writer, bool close)> getTextWriter, DisasmInfo[] methods) {
 				GetTextWriter = getTextWriter;
 				Methods = methods;
+				Kind = DisasmJobKind.Disassemble;
 			}
+
+			public DisasmJob(ElfObjectFile elfObjectFile, string elfFileName, DisasmInfo[] methods)
+			{
+				ElfObjectFile = elfObjectFile;
+				ElfFileName = elfFileName;
+				Methods = methods;
+				Kind = DisasmJobKind.Dump;
+			}
+
+			
 		}
 
 		sealed class DisasmJobContext : IDisposable {
@@ -161,7 +189,9 @@ namespace JitDasm {
 		}
 
 		static void Disassemble(DisasmJobContext context, DisasmJob job) {
+			Debug.Assert(job.Kind == DisasmJobKind.Disassemble);
 			var (writer, disposeWriter) = job.GetTextWriter();
+
 			try {
 				var methods = job.Methods;
 				Array.Sort(methods, SortMethods);
@@ -170,7 +200,7 @@ namespace JitDasm {
 						writer.WriteLine();
 
 					var method = methods[i];
-					context.Disassembler.Disassemble(context.Formatter, writer, method);
+    				context.Disassembler.Disassemble(context.Formatter, writer, method);
 				}
 			}
 			finally {
@@ -178,6 +208,22 @@ namespace JitDasm {
 					writer.Dispose();
 			}
 		}
+		
+
+		static void Dump(DisasmJobContext context, DisasmJob job, SourceCodeProvider sourceCodeProvider) {
+			Debug.Assert(job.Kind == DisasmJobKind.Dump);
+			try
+			{
+				var dumper = new ElfDumper(job.ElfObjectFile, job.Methods, sourceCodeProvider);
+				dumper.DumpMethods();
+			}
+			finally {
+				using (var stream = new FileStream(job.ElfFileName, FileMode.Create)) {
+					job.ElfObjectFile.Write(stream);
+					stream.Flush();
+				}
+			}
+		}	
 
 		// Sorted by name, except if names match, in which case the tokens are also compared
 		static int SortMethods(DisasmInfo x, DisasmInfo y) {
@@ -205,6 +251,12 @@ namespace JitDasm {
 			case FileOutputKind.Stdout:
 				baseDir = null;
 				return new[] { new DisasmJob(() => (Console.Out, false), methods) };
+			
+			case FileOutputKind.ELF:
+				if (string.IsNullOrEmpty(outputDir))
+					throw new ApplicationException("Missing filename");
+				baseDir = Path.GetDirectoryName(outputDir);
+				return new[] { new DisasmJob(new ElfObjectFile(ElfArch.X86_64), outputDir, methods) };
 
 			case FileOutputKind.OneFile:
 				if (string.IsNullOrEmpty(outputDir))
@@ -472,6 +524,7 @@ namespace JitDasm {
 			var codeInfo = method.HotColdInfo;
 			ReadCode(dataTarget, info, codeInfo.HotStart, codeInfo.HotSize);
 			ReadCode(dataTarget, info, codeInfo.ColdStart, codeInfo.ColdSize);
+			info.ProcessCode();
 			return info;
 		}
 
@@ -503,5 +556,11 @@ namespace JitDasm {
 				throw new ApplicationException($"Couldn't read process memory @ 0x{startAddr:X}");
 			info.Code.Add(new NativeCode(startAddr, code));
 		}
+	}
+
+	internal enum DisasmJobKind
+	{
+		Disassemble,
+		Dump
 	}
 }

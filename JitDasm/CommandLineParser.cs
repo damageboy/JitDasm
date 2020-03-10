@@ -176,6 +176,10 @@ namespace JitDasm {
 					case "method":
 						options.FileOutputKind = FileOutputKind.OneFilePerMethod;
 						break;
+					case "ELF":
+					case "elf":
+						options.FileOutputKind = FileOutputKind.ELF;
+						break;					
 					default:
 						throw new CommandLineParserException($"Unknown filename kind: {next}");
 					}
@@ -332,6 +336,7 @@ namespace JitDasm {
     file            => One file, use -o to set filename
     type            => One file per type, use -o to set directory
     method          => One file per method, use -o to set directory
+    elf             => Dump all extracted methods to one ELF object file
 -d, --disasm <kind>            Disassembler. <kind>:
     masm            => (default) MASM syntax
     nasm            => NASM syntax

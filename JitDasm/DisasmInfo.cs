@@ -35,6 +35,7 @@ namespace JitDasm {
 		public readonly ILMap[] ILMap;
 		public readonly List<NativeCode> Code = new List<NativeCode>();
 		public readonly InstructionList Instructions = new InstructionList();
+		public uint NativeCodeSize;
 
 		public DisasmInfo(uint typeToken, string typeFullName, uint methodToken, string methodFullName, string methodName, string? moduleFilename, ILMap[] ilMap) {
 			TypeToken = typeToken;
@@ -63,6 +64,15 @@ namespace JitDasm {
 			}
 			nativeCode = default;
 			return false;
+		}
+
+		public void ProcessCode()
+		{
+			var codeSize = 0U;
+			foreach (var info in Code)
+				codeSize += (uint) info.Code.Length;
+
+			NativeCodeSize = codeSize;
 		}
 	}
 

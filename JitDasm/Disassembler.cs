@@ -128,9 +128,7 @@ namespace JitDasm {
 			output.WriteLine("================================================================================");
 			output.Write(commentPrefix);
 			output.WriteLine(method.MethodFullName);
-			uint codeSize = 0;
-			foreach (var info in method.Code)
-				codeSize += (uint)info.Code.Length;
+			uint codeSize = method.NativeCodeSize;
 			var codeSizeHexText = codeSize.ToString(upperCaseHex ? "X" : "x");
 			output.WriteLine($"{commentPrefix}{codeSize} (0x{codeSizeHexText}) bytes");
 			var instrCount = method.Instructions.Count;
